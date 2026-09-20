@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Member, MemberTier, Order
+from app.models import Member, MemberTier, Order,Loan
 from app.schemas import MemberCreate, MemberStats
 
 # Tiers from lowest to highest; a member's rank is their index in this list.
@@ -81,4 +81,54 @@ def get_member_stats(db: Session, member_id: int, now: datetime) -> MemberStats:
     - overdue_loans counts unreturned loans with now > due_at.
     - late_fees_cents sums late fees of returned loans.
     """
-    raise NotImplementedError("get_member_stats")
+    member = get_member(db, member_id)
+
+    orders = list(
+        db.scalars(
+            select(Order)
+            .where(Order.member_id == member.id)
+        )
+    )
+
+    paid_orders = [order for order in orders if order.status == "paid"]
+
+    orders_paid = len(paid_orders)
+    total_spent_cents = sum(order.total_cents for order in paid_orders)
+
+    loans = list(
+        db.scalars(
+            select(Loan)
+            .where(Loan.member_id == member.id)
+        )
+    )
+
+    active_loans = [
+        loan
+        for loan in loans
+        if loan.returned_at is None
+    ]
+
+    overdue_loans = [
+        loan
+        for loan in active_loans
+        if now > loan.due_at
+    ]
+
+    returned_loans = [
+        loan
+        for loan in loans
+        if loan.returned_at is not None
+    ]
+
+    late_fees_cents = sum(
+        loan.late_fee_cents for loan in returned_loans
+    )
+
+    return MemberStats(
+        member_id=member.id,
+        orders_paid=orders_paid,
+        total_spent_cents=total_spent_cents,
+        active_loans=len(active_loans),
+        overdue_loans=len(overdue_loans),
+        late_fees_cents=late_fees_cents,
+    )
